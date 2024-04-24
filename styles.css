@@ -6,3 +6,25 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+.link-container-right-align {
+    float: right;
+}
+
+.modal-content table {
+    border-collapse: collapse;
+}
+
+.modal-content tr {
+    border: 1px solid red;
+}
+
+.modal-content td {
+    border: 1px solid rgb(83, 226, 17);
+}
+
+.basename-text-style {
+    font-size: small;
+    /* font-weight: bold; */
+    color: var(--link-color)
+        /* This will use the system's highlight color */
+}

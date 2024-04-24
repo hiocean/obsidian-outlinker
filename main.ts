@@ -1,134 +1,114 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { ConfirmReplaceModal } from "modal";
+import { TargetLink } from "d";
+import { Plugin, Notice } from "obsidian";
+import OuterLinkerSettingsTab, {
+	DEFAULT_SETTINGS,
+	OuterLinkerPluginSettings,
+} from "settings";
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
-}
-
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
-
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class OuterLinkerPlugin extends Plugin {
+	settings: OuterLinkerPluginSettings;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		this.addSettingTab(new OuterLinkerSettingsTab(this.app, this));
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
+			id: "accept-links",
+			name: "Accept Links",
+			callback: () => this.acceptLinks(),
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		this.addStatusBarItem()
+			.createEl("span", {
+				text: "Replace Links",
+				cls: "status-bar-item",
+			})
+			.addEventListener("click", () => this.acceptLinks());
 	}
 
-	onunload() {
-
+	async onunload() {
+		console.log("Unloading OuterLinker plugin");
 	}
-
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
-}
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
+	async acceptLinks() {
+		const targetLinks = this.getTargetLinks();
+		if (targetLinks.length === 0) {
+			new Notice("No links Found");
+			return;
+		}
+		const modal = new ConfirmReplaceModal(this.app, targetLinks, this);
+		modal.open();
 	}
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
+	getTargetLinks(): TargetLink[] {
+		// 获取当前编辑窗口
+		const editor = this.app.workspace.activeEditor?.editor;
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
+		if (!editor) return [];
 
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+		// 获取编辑窗口中的内容
+		const content = editor.getValue();
 
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
+		// 获取设置中的正则表达式和搜索文件夹
+		const { regularExpressions, folder } = this.settings;
 
-	display(): void {
-		const {containerEl} = this;
+		// 在指定文件夹中搜索匹配的文件
+		const files = this.app.vault.getFiles();
+		const matchingFiles = files.filter((file) =>
+			file.path.startsWith(folder)
+		);
 
-		containerEl.empty();
+		// 使用正则表达式匹配内容
+		const results: TargetLink[] = [];
 
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
+		regularExpressions.forEach((regexStr) => {
+			const regexp = new RegExp(`(?<!\\[)${regexStr}(?!\\])`, "g");
+
+			let match;
+			while ((match = regexp.exec(content)) !== null) {
+				const pre = Math.max(0, match.index - 10);
+				const pos = match.index + match[0].length;
+				const preContent = content.slice(pre, match.index);
+				const targetContent = content.slice(match.index, pos);
+				const postContent = content.slice(pos, pos + 10);
+
+				// 查找匹配的文件
+				const matchingFile = matchingFiles.find((file) => {
+					if (file.basename === match[0]) return true;
+					const fileCache = this.app.metadataCache.getFileCache(file);
+					const alias = fileCache?.frontmatter?.alias;
+					if (alias === match[0]) return true;
+					return false;
+				});
+
+				if (matchingFile) {
+					results.push({
+						file: matchingFile,
+						matches: [
+							{
+								preContent: preContent,
+								targetContent: targetContent,
+								postContent: postContent,
+								checked: true,
+							},
+						],
+					});
+				}
+			}
+		});
+
+		return results;
 	}
 }
